@@ -11,6 +11,7 @@ Supports all available quality settings from 360p Smooth up to **4K Ultra HD (21
 - **All Bilibili URL formats** — BV, AV, b23.tv short links, mobile (`m.bilibili.com`), multi-part (`?p=2`), and URLs with arbitrary tracking query parameters
 - **Real-time progress** — download speed, bytes transferred, and ETA via Server-Sent Events
 - **Audio/video merging** — separate DASH streams are automatically merged into a single `.mp4` via FFmpeg
+- **Subtitle download (optional)** — pick a subtitle language + format from the UI dropdown and download it separately (not bundled with the video)
 - **Cookie support** — use an exported `cookies.txt` file or load your current local browser session automatically for access to higher-quality streams
 
 ---
@@ -171,6 +172,7 @@ If browser-cookie loading does not work on your machine, use the exported `cooki
 | `POST` | `/api/download` | Start a background download, returns `task_id` |
 | `GET` | `/api/progress/<task_id>` | Server-Sent Events stream for real-time progress |
 | `GET` | `/api/file/<task_id>` | Download the completed `.mp4` file |
+| `GET` | `/api/subtitle?url=...&kind=...&lang=...&ext=...` | Download a single subtitle file (separate from video) |
 | `DELETE` | `/api/cleanup/<task_id>` | Remove the task and its files from the server |
 
 ### POST `/api/info`
@@ -260,6 +262,8 @@ bilibili-downloader-python/
 - Downloaded files are stored in the `downloads/` directory under a per-task UUID sub-folder. They are deleted automatically when you click **New Download** in the UI, or when you call `DELETE /api/cleanup/<task_id>`.
 - The server does **not** cache or re-serve files across restarts. Task state is in-memory only.
 - High-quality streams (1080p and above) on Bilibili are distributed as separate video and audio DASH streams; FFmpeg is required to merge them into a single file.
+- Subtitles are not downloaded during the video download. Use the subtitle dropdown in the UI (or `GET /api/subtitle`) to download a subtitle file separately.
+- Subtitle formats are source-dependent. Some videos may only provide subtitles in formats like `json3` (Bilibili). When conversion is not possible, the server returns the original subtitle file that yt-dlp produced.
 - The app uses standard authenticated access via your own cookies. It does not include stealth or anti-bot bypass features.
 - On macOS, Safari cookie access can fail if the Python host process does not have permission to read Safari's cookie storage.
 - This tool is intended for **personal, offline use** of content you are entitled to access. Always respect Bilibili's Terms of Service and the rights of content creators.

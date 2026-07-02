@@ -126,6 +126,20 @@
     .url-input::placeholder { color: var(--muted); }
     .url-input:focus { border-color: var(--accent); }
 
+    select.url-input {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) calc(50% - 3px),
+        calc(100% - 12px) calc(50% - 3px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 34px;
+    }
+
     /* ---------------------------------------------------------------
        Buttons
     --------------------------------------------------------------- */
@@ -349,6 +363,13 @@
       justify-content: center;
     }
 
+    .subtitle-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+      align-items: center;
+    }
+
     /* ---------------------------------------------------------------
        Spinner
     --------------------------------------------------------------- */
@@ -446,6 +467,13 @@
     <!-- Quality selector -->
     <div class="section-label">Select Quality</div>
     <div id="quality-grid" class="quality-grid"></div>
+
+    <!-- Subtitles (optional) -->
+    <div class="section-label">Subtitles (optional)</div>
+    <div class="subtitle-row">
+      <select id="subtitle-select" class="url-input" aria-label="Subtitle selection"></select>
+      <button id="subtitle-btn" class="btn btn-ghost" onclick="downloadSubtitle()">Download</button>
+    </div>
 
     <!-- Download trigger button -->
     <button id="download-btn" class="btn btn-pink" onclick="startDownload()">
@@ -638,6 +666,31 @@
       grid.appendChild(opt);
     });
 
+    // Subtitle dropdown
+    const subSelect = document.getElementById("subtitle-select");
+    const subBtn = document.getElementById("subtitle-btn");
+    const opts = data.subtitle_options || [];
+    subSelect.innerHTML = "";
+
+    const noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = opts.length ? "No subtitles" : "No subtitles available";
+    subSelect.appendChild(noneOpt);
+
+    opts.forEach((opt) => {
+      const o = document.createElement("option");
+      o.value = opt.id;
+      const kindLabel = opt.kind === "auto" ? "Auto" : "Manual";
+      o.textContent = `${opt.lang} · ${opt.ext.toUpperCase()} · ${kindLabel}`;
+      subSelect.appendChild(o);
+    });
+
+    subSelect.disabled = false;
+    subBtn.disabled = true;
+    subSelect.onchange = () => {
+      subBtn.disabled = !subSelect.value;
+    };
+
     // Reset sub-sections
     document.getElementById("download-btn").classList.remove("hidden");
     document.getElementById("download-btn").disabled = false;
@@ -647,6 +700,24 @@
     clearError(document.getElementById("dl-error"));
 
     document.getElementById("info-card").classList.remove("hidden");
+  }
+
+  function downloadSubtitle() {
+    const subSelect = document.getElementById("subtitle-select");
+    const val = (subSelect.value || "").trim();
+    if (!val) return;
+
+    const parts = val.split(":");
+    if (parts.length !== 3) return;
+    const [kind, lang, ext] = parts;
+
+    const target = `/api/subtitle?url=${encodeURIComponent(currentUrl)}`
+      + `&kind=${encodeURIComponent(kind)}`
+      + `&lang=${encodeURIComponent(lang)}`
+      + `&ext=${encodeURIComponent(ext)}`;
+
+    // Trigger a browser download (separate from the video download)
+    window.location.href = target;
   }
 
   /* ---------------------------------------------------------------

@@ -6,6 +6,7 @@ import time
 import shutil
 import sys
 import threading
+from io import BytesIO
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -24,6 +25,10 @@ BASE_DIR = Path(__file__).parent
 DOWNLOAD_DIR = BASE_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 COOKIES_FILE = BASE_DIR / "cookies.txt"
+
+# Common subtitle extensions. We do not strictly limit subtitle formats to this list
+# since some sites (including Bilibili) may expose subtitles in formats like `json3`.
+_SUBTITLE_EXTS = {".srt", ".vtt", ".ass", ".ssa", ".ttml", ".json", ".json3", ".xml"}
 
 # ---------------------------------------------------------------------------
 # Thread-safe task store
@@ -317,6 +322,77 @@ def _resolve_auth_opts() -> dict:
     return dict(_resolve_auth_context()["yt_dlp_opts"])
 
 
+def _sanitize_lang(lang: str) -> str | None:
+    lang = (lang or "").strip()
+    if not lang:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", lang):
+        return None
+    return lang
+
+
+def _sanitize_kind(kind: str) -> str | None:
+    kind = (kind or "").strip().lower()
+    if kind in ("manual", "auto"):
+        return kind
+    return None
+
+
+def _sanitize_sub_ext(ext: str) -> str | None:
+    ext = (ext or "").strip().lower().lstrip(".")
+    if not ext:
+        return None
+    # keep tight: subtitle formats are simple alphanumerics
+    if not re.fullmatch(r"[a-z0-9]{1,10}", ext):
+        return None
+    return ext
+
+
+def _extract_subtitle_options(info: dict) -> list[dict]:
+    """
+    Return a flattened list of available subtitle options:
+      - manual subtitles: info["subtitles"]
+      - auto captions: info["automatic_captions"]
+    Each option is identified by {kind}:{lang}:{ext}
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(kind: str, mapping: dict | None):
+        if not isinstance(mapping, dict):
+            return
+        for lang, items in mapping.items():
+            lang_s = _sanitize_lang(str(lang))
+            if not lang_s or not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                ext = item.get("ext")
+                # Do not filter out site-specific formats (e.g. bilibili `json3`);
+                # just validate they are safe to echo back to the client.
+                ext_s = _sanitize_sub_ext(str(ext)) if ext else None
+                if not ext_s:
+                    continue
+                opt_id = f"{kind}:{lang_s}:{ext_s}"
+                if opt_id in seen:
+                    continue
+                seen.add(opt_id)
+                out.append({
+                    "id": opt_id,
+                    "kind": kind,
+                    "lang": lang_s,
+                    "ext": ext_s,
+                })
+
+    add("manual", info.get("subtitles"))
+    add("auto", info.get("automatic_captions"))
+
+    # Sort: manual first, then auto. Within, group by lang then ext
+    out.sort(key=lambda x: (0 if x["kind"] == "manual" else 1, x["lang"], x["ext"]))
+    return out
+
+
 def _is_allowed_thumbnail_url(url: str) -> bool:
     try:
         parsed = urlparse(url)
@@ -417,9 +493,19 @@ def api_info():
     auth_context = _resolve_auth_context()
 
     try:
-        opts = _base_ydl_opts({"skip_download": True})
+        # Some extractors (including Bilibili in certain cases) may not populate
+        # subtitle metadata unless subtitle options are enabled. We enable both
+        # manual and automatic subtitle metadata extraction here, but still do
+        # not download any media because download=False below.
+        opts = _base_ydl_opts({
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+        })
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
+
+        subtitle_options = _extract_subtitle_options(info)
 
         # Build a deduplicated, sorted list of video formats
         formats = []
@@ -469,6 +555,7 @@ def api_info():
             "like_count": info.get("like_count"),
             "url": url,
             "formats": formats,
+            "subtitle_options": subtitle_options,
             "auth": {
                 "mode": auth_context["mode"],
                 "has_auth": auth_context["has_auth"],
@@ -581,6 +668,113 @@ def api_file(task_id: str):
     )
 
 
+@app.route("/api/subtitle")
+def api_subtitle():
+    """
+    Download a single subtitle file *separately* from the video.
+
+    Query params:
+      - url: Bilibili video URL
+      - kind: "manual" | "auto"
+      - lang: subtitle language code, e.g. "en", "zh-Hans"
+      - ext: desired subtitle format extension, e.g. "srt", "vtt"
+    """
+    raw_url = (request.args.get("url") or "").strip()
+    kind = _sanitize_kind(request.args.get("kind") or "")
+    lang = _sanitize_lang(request.args.get("lang") or "")
+    ext = _sanitize_sub_ext(request.args.get("ext") or "")
+
+    if not raw_url:
+        return jsonify({"error": "url is required."}), 400
+    if not is_bilibili_url(raw_url):
+        return jsonify({"error": "Only Bilibili URLs are supported (bilibili.com, b23.tv)."}), 400
+    if not kind or not lang or not ext:
+        return jsonify({"error": "kind, lang, and ext are required (and must be valid)."}), 400
+
+    url = resolve_bilibili_url(raw_url)
+
+    tmp_root = BASE_DIR / ".runtime" / "subtitles"
+    tmp_dir = tmp_root / str(uuid.uuid4())
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        extra: dict = {
+            "skip_download": True,
+            "outtmpl": str(tmp_dir / "%(title)s.%(ext)s"),
+            "quiet": True,
+            "no_warnings": True,
+            # Subtitles are optional and downloaded only via this endpoint
+            "writesubtitles": True,
+            "writeautomaticsub": (kind == "auto"),
+            "subtitleslangs": [lang],
+            "subtitlesformat": ext,
+        }
+
+        # Convert subtitles only for formats FFmpeg can reasonably handle.
+        # Some sources expose subtitles as JSON (e.g. `json3`) that cannot be
+        # converted by FFmpeg; in those cases we will return the original file.
+        if ext in ("srt", "vtt", "ass", "ssa", "ttml"):
+            extra["postprocessors"] = [
+                {"key": "FFmpegSubtitlesConvertor", "format": ext},
+            ]
+
+        opts = _base_ydl_opts(extra)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+
+        candidates = [p for p in sorted(tmp_dir.iterdir()) if p.is_file()]
+        wanted_suffix = f".{ext}"
+        subtitle_files = [p for p in candidates if p.suffix.lower() == wanted_suffix]
+        if not subtitle_files:
+            # Fall back to any subtitle-like file if conversion didn't happen
+            subtitle_files = [p for p in candidates if p.suffix.lower() in _SUBTITLE_EXTS]
+        if not subtitle_files and candidates:
+            # Last resort: return whatever file yt-dlp actually produced
+            subtitle_files = candidates
+
+        if not subtitle_files:
+            return jsonify({"error": "No subtitle file was produced for the selected option."}), 404
+
+        # Prefer a file that includes the language code in the name
+        preferred = next(
+            (p for p in subtitle_files if f".{lang}." in p.name),
+            subtitle_files[0],
+        )
+
+        content = preferred.read_bytes()
+        filename = preferred.name
+
+        # Clean up tmp output
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        mimetype = {
+            "srt": "application/x-subrip",
+            "vtt": "text/vtt",
+            "ass": "text/plain",
+            "ssa": "text/plain",
+            "ttml": "application/ttml+xml",
+            "json": "application/json",
+            "json3": "application/json",
+            "xml": "application/xml",
+        }.get(ext, "text/plain")
+
+        return send_file(
+            BytesIO(content),
+            mimetype=mimetype,
+            as_attachment=True,
+            download_name=filename,
+            max_age=0,
+        )
+
+    except yt_dlp.utils.DownloadError as exc:
+        msg = re.sub(r"^ERROR:\s*", "", str(exc)).strip()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return jsonify({"error": msg}), 400
+    except Exception as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return jsonify({"error": f"Unexpected error: {exc}"}), 500
+
+
 @app.route("/api/cleanup/<task_id>", methods=["DELETE"])
 def api_cleanup(task_id: str):
     """Delete the task and its downloaded files from disk."""
@@ -658,12 +852,15 @@ def _download_worker(task_id: str, url: str, format_id: str):
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
-        # Find the output file (there should be exactly one)
-        files = sorted(task_dir.iterdir())
+        # Find the video output file (subtitles / metadata may also exist)
+        files = [p for p in sorted(task_dir.iterdir()) if p.is_file()]
         if not files:
             raise FileNotFoundError("Download produced no output file.")
 
-        filepath = files[0]
+        preferred_video_exts = (".mp4", ".mkv", ".webm", ".mov")
+        video_files = [p for p in files if p.suffix.lower() in preferred_video_exts]
+        filepath = (video_files[0] if video_files else files[0])
+
         with tasks_lock:
             tasks[task_id].update({
                 "status": "done",
