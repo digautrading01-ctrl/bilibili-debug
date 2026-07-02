@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bilibili Downloader</title>
+  <style>
+    /* ---------------------------------------------------------------
+       Design tokens
+    --------------------------------------------------------------- */
+    :root {
+      --bg:          #0d0d10;
+      --surface:     #18181d;
+      --surface2:    #222228;
+      --border:      #2c2c34;
+      --text:        #e8e8f0;
+      --muted:       #7878a0;
+      --accent:      #00b5e2;
+      --accent-dim:  rgba(0, 181, 226, 0.14);
+      --pink:        #fb7299;
+      --pink-dim:    rgba(251, 114, 153, 0.14);
+      --green:       #23d18b;
+      --green-dim:   rgba(35, 209, 139, 0.14);
+      --amber:       #ffc107;
+      --amber-dim:   rgba(255, 193, 7, 0.14);
+      --red:         #f05050;
+      --red-dim:     rgba(240, 80, 80, 0.14);
+      --radius:      12px;
+      --radius-sm:   8px;
+    }
+
+    /* ---------------------------------------------------------------
+       Reset & base
+    --------------------------------------------------------------- */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px 16px 48px;
+      line-height: 1.5;
+    }
+
+    a { color: inherit; }
+
+    /* ---------------------------------------------------------------
+       Layout
+    --------------------------------------------------------------- */
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    /* ---------------------------------------------------------------
+       Header
+    --------------------------------------------------------------- */
+    header {
+      text-align: center;
+      padding: 48px 0 32px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+
+    .brand-icon {
+      width: 48px;
+      height: 48px;
+      background: var(--pink);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 6px;
+    }
+
+    /* ---------------------------------------------------------------
+       Cards
+    --------------------------------------------------------------- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 14px;
+    }
+
+    /* ---------------------------------------------------------------
+       URL input row
+    --------------------------------------------------------------- */
+    .url-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .url-input {
+      flex: 1;
+      min-width: 0;
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 14px;
+      padding: 11px 14px;
+      outline: none;
+      transition: border-color 0.18s;
+    }
+    .url-input::placeholder { color: var(--muted); }
+    .url-input:focus { border-color: var(--accent); }
+
+    /* ---------------------------------------------------------------
+       Buttons
+    --------------------------------------------------------------- */
+    .btn {
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 11px 20px;
+      transition: opacity 0.18s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:active:not(:disabled) { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+
+    .btn-accent  { background: var(--accent); color: #000; }
+    .btn-pink    { background: var(--pink);   color: #fff; width: 100%; justify-content: center; display: flex; align-items: center; gap: 6px; }
+    .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-green   { background: var(--green);  color: #000; }
+
+    /* ---------------------------------------------------------------
+       Alerts
+    --------------------------------------------------------------- */
+    .alert {
+      padding: 11px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      margin-top: 12px;
+      line-height: 1.45;
+    }
+    .alert-error   { background: var(--red-dim);   border: 1px solid rgba(240,80,80,.3);  color: var(--red); }
+    .alert-info    { background: var(--accent-dim); border: 1px solid rgba(0,181,226,.3); color: var(--accent); }
+    .alert-warn    { background: var(--amber-dim); border: 1px solid rgba(255,193,7,.3); color: var(--amber); }
+
+    /* ---------------------------------------------------------------
+       Video info area
+    --------------------------------------------------------------- */
+    .video-header {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .thumb {
+      width: 136px;
+      height: 86px;
+      object-fit: cover;
+      border-radius: 8px;
+      background: var(--surface2);
+      flex-shrink: 0;
+    }
+
+    .video-meta { flex: 1; min-width: 0; }
+
+    .video-title {
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.45;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .meta-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .meta-chip {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* ---------------------------------------------------------------
+       Quality selector
+    --------------------------------------------------------------- */
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(154px, 1fr));
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .quality-option { position: relative; }
+
+    .quality-option input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .quality-option label {
+      display: block;
+      padding: 9px 13px;
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .quality-option label:hover { border-color: var(--accent); }
+    .quality-option input:checked + label {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .q-name {
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .quality-option input:checked + label .q-name { color: var(--accent); }
+
+    .q-detail {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+    .quality-option input:checked + label .q-detail { color: var(--accent); opacity: 0.65; }
+
+    /* ---------------------------------------------------------------
+       Badges
+    --------------------------------------------------------------- */
+    .badge {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      line-height: 1.5;
+    }
+    .badge-4k  { background: var(--pink-dim);  color: var(--pink); }
+    .badge-8k  { background: var(--pink-dim);  color: var(--pink); }
+    .badge-hdr { background: var(--amber-dim); color: var(--amber); }
+    .badge-hfr { background: var(--green-dim); color: var(--green); }
+
+    /* ---------------------------------------------------------------
+       Progress section
+    --------------------------------------------------------------- */
+    .progress-section { margin-top: 16px; }
+
+    .progress-top {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    .progress-bar {
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+    .progress-fill.state-done  { background: var(--green); }
+    .progress-fill.state-error { background: var(--red); }
+
+    .progress-detail {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+      min-height: 16px;
+    }
+
+    /* ---------------------------------------------------------------
+       Download-ready panel
+    --------------------------------------------------------------- */
+    .ready-panel {
+      text-align: center;
+      padding: 16px 0 4px;
+    }
+
+    .ready-icon { font-size: 36px; margin-bottom: 8px; }
+
+    .ready-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .ready-filename {
+      font-size: 12px;
+      color: var(--muted);
+      word-break: break-all;
+      margin-bottom: 16px;
+    }
+
+    .ready-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+
+    /* ---------------------------------------------------------------
+       Spinner
+    --------------------------------------------------------------- */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid transparent;
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---------------------------------------------------------------
+       Utilities
+    --------------------------------------------------------------- */
+    .hidden { display: none !important; }
+
+    /* ---------------------------------------------------------------
+       Footer
+    --------------------------------------------------------------- */
+    footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      padding-top: 28px;
+    }
+
+    /* ---------------------------------------------------------------
+       Responsive tweaks
+    --------------------------------------------------------------- */
+    @media (max-width: 480px) {
+      .url-row { flex-direction: column; }
+      .video-header { flex-direction: column; }
+      .thumb { width: 100%; height: auto; aspect-ratio: 16/9; }
+      .quality-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ============================================================
+       Header
+  ============================================================ -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">▶</div>
+      <h1>Bilibili Downloader</h1>
+    </div>
+    <p class="subtitle">Download videos up to 4K&nbsp;/&nbsp;2160p &mdash; all quality settings supported</p>
+  </header>
+
+  <!-- ============================================================
+       URL input card
+  ============================================================ -->
+  <div class="card">
+    <div class="url-row">
+      <input
+        id="url-input"
+        class="url-input"
+        type="text"
+        placeholder="Paste a Bilibili URL (BV, AV, b23.tv&hellip;)"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="fetch-btn" class="btn btn-accent" onclick="fetchInfo()">Fetch</button>
+    </div>
+    <div id="fetch-error" class="alert alert-error hidden"></div>
+  </div>
+
+  <!-- ============================================================
+       Video info + download card  (hidden until info loaded)
+  ============================================================ -->
+  <div id="info-card" class="card hidden">
+
+    <!-- Video header -->
+    <div class="video-header">
+      <img id="thumb" class="thumb" src="" alt="thumbnail" />
+      <div class="video-meta">
+        <div id="video-title" class="video-title"></div>
+        <div class="meta-chips">
+          <span id="chip-auth"      class="meta-chip"></span>
+          <span id="chip-uploader"  class="meta-chip"></span>
+          <span id="chip-duration"  class="meta-chip"></span>
+          <span id="chip-views"     class="meta-chip"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="auth-info" class="alert alert-info hidden"></div>
+
+    <!-- Quality selector -->
+    <div class="section-label">Select Quality</div>
+    <div id="quality-grid" class="quality-grid"></div>
+
+    <!-- Download trigger button -->
+    <button id="download-btn" class="btn btn-pink" onclick="startDownload()">
+      Download
+    </button>
+
+    <!-- Progress area -->
+    <div id="progress-section" class="progress-section hidden">
+      <div class="progress-top">
+        <span id="prog-status">Preparing…</span>
+        <span id="prog-pct">0%</span>
+      </div>
+      <div class="progress-bar">
+        <div id="prog-fill" class="progress-fill"></div>
+      </div>
+      <div id="prog-detail" class="progress-detail"></div>
+    </div>
+
+    <!-- Download-ready panel -->
+    <div id="ready-panel" class="ready-panel hidden">
+      <div class="ready-icon">✅</div>
+      <div class="ready-title">Ready to save!</div>
+      <div id="ready-filename" class="ready-filename"></div>
+      <div class="ready-actions">
+        <a id="save-link" class="btn btn-green" style="text-decoration:none; padding:11px 22px; border-radius:8px; font-weight:700; font-size:14px;">
+          Save File
+        </a>
+        <button class="btn btn-ghost" onclick="resetAll()">New Download</button>
+      </div>
+    </div>
+
+    <!-- Download error -->
+    <div id="dl-error" class="alert alert-error hidden"></div>
+
+  </div><!-- /#info-card -->
+
+  <footer>
+    For personal use only &mdash; please respect content creators and Bilibili&rsquo;s Terms of Service.
+  </footer>
+</div><!-- /.container -->
+
+<!-- ================================================================
+     JavaScript
+================================================================ -->
+<script>
+  "use strict";
+
+  /* ---------------------------------------------------------------
+     State
+  --------------------------------------------------------------- */
+  let currentUrl    = "";
+  let currentTaskId = null;
+  let evtSource     = null;
+
+  /* ---------------------------------------------------------------
+     Helpers
+  --------------------------------------------------------------- */
+  function fmt_duration(sec) {
+    if (!sec) return "";
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+    return `${m}:${pad(s)}`;
+  }
+
+  function pad(n) { return String(n).padStart(2, "0"); }
+
+  function fmt_bytes(b, dp = 1) {
+    if (!b || b <= 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    const i = Math.min(Math.floor(Math.log(b) / Math.log(1024)), units.length - 1);
+    return `${(b / 1024 ** i).toFixed(dp)} ${units[i]}`;
+  }
+
+  function fmt_speed(bps) {
+    return bps ? fmt_bytes(bps) + "/s" : "";
+  }
+
+  function fmt_views(n) {
+    if (!n) return "";
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M views";
+    if (n >= 1_000)     return (n / 1_000).toFixed(1) + "K views";
+    return n + " views";
+  }
+
+  function setError(el, msg) {
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+  function clearError(el) { el.classList.add("hidden"); }
+
+  function setAuthInfo(auth) {
+    const authEl = document.getElementById("auth-info");
+    if (!auth || !auth.message) {
+      authEl.textContent = "";
+      authEl.className = "alert alert-info hidden";
+      return;
+    }
+
+    const tone = auth.level === "warning" ? "warn" : "info";
+    authEl.textContent = auth.message;
+    authEl.className = `alert alert-${tone}`;
+  }
+
+  function badges(fmt) {
+    const out = [];
+    if (fmt.height >= 4320) out.push('<span class="badge badge-8k">8K</span>');
+    else if (fmt.height >= 2160) out.push('<span class="badge badge-4k">4K</span>');
+    if (/HDR|Dolby/i.test(fmt.label)) out.push('<span class="badge badge-hdr">HDR</span>');
+    if (fmt.fps && fmt.fps >= 60)     out.push('<span class="badge badge-hfr">60fps</span>');
+    return out.join(" ");
+  }
+
+  /* ---------------------------------------------------------------
+     Fetch video info
+  --------------------------------------------------------------- */
+  async function fetchInfo() {
+    const input  = document.getElementById("url-input");
+    const btn    = document.getElementById("fetch-btn");
+    const errEl  = document.getElementById("fetch-error");
+    const url    = input.value.trim();
+
+    if (!url) { input.focus(); return; }
+
+    clearError(errEl);
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Fetching…';
+
+    try {
+      const res  = await fetch("/api/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        setError(errEl, data.error || "Failed to fetch video info.");
+        return;
+      }
+
+      currentUrl = data.url;
+      renderInfo(data);
+
+    } catch {
+      setError(errEl, "Network error — is the server running?");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Fetch";
+    }
+  }
+
+  /* ---------------------------------------------------------------
+     Render video info
+  --------------------------------------------------------------- */
+  function renderInfo(data) {
+    document.getElementById("thumb").src          = data.thumbnail || "";
+    document.getElementById("video-title").textContent = data.title;
+
+    const chipUploader = document.getElementById("chip-uploader");
+    const chipDuration = document.getElementById("chip-duration");
+    const chipViews    = document.getElementById("chip-views");
+    const chipAuth     = document.getElementById("chip-auth");
+
+    chipAuth.textContent     = data.auth?.has_auth ? "🔐 " + (data.auth.source || "Authenticated") : "🔓 Guest access";
+    chipUploader.textContent = data.uploader ? "👤 " + data.uploader : "";
+    chipDuration.textContent = data.duration  ? "⏱ " + fmt_duration(data.duration) : "";
+    chipViews.textContent    = data.view_count ? "👁 " + fmt_views(data.view_count) : "";
+    setAuthInfo(data.auth);
+
+    // Quality grid
+    const grid = document.getElementById("quality-grid");
+    grid.innerHTML = "";
+
+    data.formats.forEach((fmt, i) => {
+      const detail = [
+        fmt.fps ? fmt.fps + " fps" : "",
+        fmt.filesize ? fmt_bytes(fmt.filesize) : "",
+      ].filter(Boolean).join("  ·  ");
+
+      const opt = document.createElement("div");
+      opt.className = "quality-option";
+      opt.innerHTML = `
+        <input type="radio" name="quality" id="q${i}" value="${fmt.id}" ${i === 0 ? "checked" : ""}>
+        <label for="q${i}">
+          <div class="q-name">${fmt.label} ${badges(fmt)}</div>
+          ${detail ? `<div class="q-detail">${detail}</div>` : ""}
+        </label>`;
+      grid.appendChild(opt);
+    });
+
+    // Reset sub-sections
+    document.getElementById("download-btn").classList.remove("hidden");
+    document.getElementById("download-btn").disabled = false;
+    document.getElementById("download-btn").innerHTML = "Download";
+    document.getElementById("progress-section").classList.add("hidden");
+    document.getElementById("ready-panel").classList.add("hidden");
+    clearError(document.getElementById("dl-error"));
+
+    document.getElementById("info-card").classList.remove("hidden");
+  }
+
+  /* ---------------------------------------------------------------
+     Start download
+  --------------------------------------------------------------- */
+  async function startDownload() {
+    const selected = document.querySelector('input[name="quality"]:checked');
+    if (!selected) { alert("Please select a quality."); return; }
+
+    const btn    = document.getElementById("download-btn");
+    const errEl  = document.getElementById("dl-error");
+
+    clearError(errEl);
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Starting…';
+
+    try {
+      const res  = await fetch("/api/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: currentUrl, format_id: selected.value }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        setError(errEl, data.error || "Failed to start download.");
+        btn.disabled = false;
+        btn.innerHTML = "Download";
+        return;
+      }
+
+      currentTaskId = data.task_id;
+      btn.classList.add("hidden");
+      document.getElementById("progress-section").classList.remove("hidden");
+      listenProgress(currentTaskId);
+
+    } catch {
+      setError(errEl, "Network error starting download.");
+      btn.disabled = false;
+      btn.innerHTML = "Download";
+    }
+  }
+
+  /* ---------------------------------------------------------------
+     SSE progress listener
+  --------------------------------------------------------------- */
+  function listenProgress(taskId) {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+
+    evtSource = new EventSource(`/api/progress/${taskId}`);
+    evtSource.onmessage = (e) => handleProgress(JSON.parse(e.data), taskId);
+    evtSource.onerror   = ()  => evtSource.close();
+  }
+
+  function handleProgress(d, taskId) {
+    const fill     = document.getElementById("prog-fill");
+    const statusEl = document.getElementById("prog-status");
+    const pctEl    = document.getElementById("prog-pct");
+    const detailEl = document.getElementById("prog-detail");
+
+    const pct = d.percent || 0;
+    fill.style.width = pct + "%";
+    pctEl.textContent = pct.toFixed(1) + "%";
+
+    switch (d.status) {
+      case "pending":
+        statusEl.textContent = "Preparing…";
+        break;
+
+      case "downloading": {
+        statusEl.textContent = "Downloading…";
+        const parts = [];
+        if (d.speed)   parts.push(fmt_speed(d.speed));
+        if (d.total)   parts.push(fmt_bytes(d.downloaded) + " / " + fmt_bytes(d.total));
+        if (d.eta)     parts.push("ETA " + d.eta + "s");
+        detailEl.textContent = parts.join("   ·   ");
+        break;
+      }
+
+      case "processing":
+        statusEl.textContent = "Processing (merging streams)…";
+        detailEl.textContent = "";
+        break;
+
+      case "done":
+        fill.classList.add("state-done");
+        fill.style.width = "100%";
+        statusEl.textContent = "Complete!";
+        pctEl.textContent = "100%";
+        if (evtSource) { evtSource.close(); evtSource = null; }
+        setTimeout(() => showReady(taskId, d.filename), 600);
+        break;
+
+      case "error":
+        fill.classList.add("state-error");
+        statusEl.textContent = "Error";
+        if (evtSource) { evtSource.close(); evtSource = null; }
+        setError(document.getElementById("dl-error"), d.error || "Download failed.");
+        const btn = document.getElementById("download-btn");
+        btn.classList.remove("hidden");
+        btn.disabled = false;
+        btn.innerHTML = "Retry";
+        break;
+    }
+  }
+
+  /* ---------------------------------------------------------------
+     Show download-ready panel
+  --------------------------------------------------------------- */
+  function showReady(taskId, filename) {
+    document.getElementById("progress-section").classList.add("hidden");
+
+    const panel    = document.getElementById("ready-panel");
+    const saveLink = document.getElementById("save-link");
+
+    document.getElementById("ready-filename").textContent = filename || "video.mp4";
+    saveLink.href = `/api/file/${taskId}`;
+    saveLink.setAttribute("download", filename || "video.mp4");
+
+    panel.classList.remove("hidden");
+  }
+
+  /* ---------------------------------------------------------------
+     Reset everything for a new download
+  --------------------------------------------------------------- */
+  function resetAll() {
+    // Fire-and-forget cleanup
+    if (currentTaskId) {
+      fetch(`/api/cleanup/${currentTaskId}`, { method: "DELETE" }).catch(() => {});
+      currentTaskId = null;
+    }
+    if (evtSource) { evtSource.close(); evtSource = null; }
+
+    document.getElementById("url-input").value = "";
+    document.getElementById("info-card").classList.add("hidden");
+    clearError(document.getElementById("fetch-error"));
+    document.getElementById("url-input").focus();
+  }
+
+  /* ---------------------------------------------------------------
+     Keyboard shortcut: Enter in URL input triggers fetch
+  --------------------------------------------------------------- */
+  document.getElementById("url-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") fetchInfo();
+  });
+</script>
+</body>
+</html>
